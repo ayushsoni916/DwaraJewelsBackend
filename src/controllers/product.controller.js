@@ -17,7 +17,8 @@ const createProduct = async (req, res) => {
             images,
             thumbnail,
             tags,
-            isNewArrival
+            isNewArrival,
+            isLuxe
         } = req.body;
 
         // Basic validation
@@ -45,7 +46,8 @@ const createProduct = async (req, res) => {
             images,
             thumbnail,
             tags,
-            isNewArrival
+            isNewArrival,
+            isLuxe: isLuxe || false
         });
 
         return res.status(201).json({
@@ -65,7 +67,7 @@ const createProduct = async (req, res) => {
 // Supports filters: ?category=ID & ?minPrice=100 & ?maxPrice=500 & ?sort=newest
 const getProducts = async (req, res) => {
     try {
-        const { category, subCategory, minPrice, maxPrice, sort, search } = req.query;
+        const { category, subCategory, minPrice, maxPrice, sort, search, luxe } = req.query;
 
         // Build dynamic query object
         let query = {};
@@ -76,6 +78,14 @@ const getProducts = async (req, res) => {
 
         if (subCategory) {
             query.subCategory = subCategory;
+        }
+
+        // --- Luxe Filter Logic ---
+        if (luxe === 'true') {
+            query.isLuxe = true;
+        } else if (luxe === 'false') {
+            // Fetches products where isLuxe is false OR the field is missing (legacy data)
+            query.isLuxe = { $ne: true };
         }
 
         if (minPrice || maxPrice) {
@@ -140,24 +150,29 @@ const getProductDetails = async (req, res) => {
 }
 
 // 4. Get Similar Products (Recommendation Engine)
-// Logic: Finds products in the same category or matching tags, excluding the current one
+// 4. Get Similar Products (Recommendation Engine)
+// Logic: Finds products in same category AND matching Luxe status, excluding current one
 const getSimilarProducts = async (req, res) => {
     try {
         const { id } = req.params;
 
-        // First, find the current product to know its category/tags
+        // 1. Find the current product to get its metadata
         const currentProduct = await productModel.findById(id);
 
         if (!currentProduct) {
             return res.status(404).json({ error: "Product not found" });
         }
 
-        const similarProducts = await productModel.find({
-            category: currentProduct.category,
-            _id: { $ne: currentProduct._id } // Exclude current product
-        })
-            .limit(6) // Limit to 6 items for the UI
-            .select("title price thumbnail metal") // Select only needed fields for cards
+        // 2. Build the similarity query
+        const query = {
+            _id: { $ne: currentProduct._id }, // Exclude the current product
+            category: currentProduct.category, // Match category
+            isLuxe: currentProduct.isLuxe      // Match the Luxe/Normal status
+        };
+
+        const similarProducts = await productModel.find(query)
+            .limit(6)
+            .select("title price thumbnail metal isLuxe")
             .lean();
 
         return res.json({
@@ -165,12 +180,42 @@ const getSimilarProducts = async (req, res) => {
             products: similarProducts
         });
 
-
     } catch (error) {
         console.error("getSimilarProducts error", error);
         return res.status(500).json({ error: "Internal server error" });
     }
 }
+// // Logic: Finds products in the same category or matching tags, excluding the current one
+// const getSimilarProducts = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+
+//         // First, find the current product to know its category/tags
+//         const currentProduct = await productModel.findById(id);
+
+//         if (!currentProduct) {
+//             return res.status(404).json({ error: "Product not found" });
+//         }
+
+//         const similarProducts = await productModel.find({
+//             category: currentProduct.category,
+//             _id: { $ne: currentProduct._id } // Exclude current product
+//         })
+//             .limit(6) // Limit to 6 items for the UI
+//             .select("title price thumbnail metal") // Select only needed fields for cards
+//             .lean();
+
+//         return res.json({
+//             success: true,
+//             products: similarProducts
+//         });
+
+
+//     } catch (error) {
+//         console.error("getSimilarProducts error", error);
+//         return res.status(500).json({ error: "Internal server error" });
+//     }
+// }
 
 module.exports = {
     createProduct,

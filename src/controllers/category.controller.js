@@ -5,15 +5,26 @@ const categoryModel = require("../models/category.model");
 // Use this to populate "Earrings", "Rings", etc.
 const createCategory = async (req, res) => {
     try {
-        const { name, image, subCategories, isFeatured } = req.body;
+        const { name, image, subCategories, isFeatured, isLuxeCategory } = req.body;
 
         if (!name) {
             return res.status(400).json({ error: "Category name is required" });
         }
 
-        const existing = await categoryModel.findOne({ name });
+        // 1. Normalize the luxe flag (Old categories without this var are treated as false)
+        const luxeStatus = isLuxeCategory || false;
+
+        // 2. Check for existence based on BOTH name and Luxe status
+        // This allows 'Ring' (false) and 'Ring' (true) to coexist.
+        const existing = await categoryModel.findOne({
+            name: name,
+            isLuxeCategory: luxeStatus
+        });
+
         if (existing) {
-            return res.status(400).json({ error: "Category already exists" });
+            return res.status(400).json({
+                error: `Category '${name}' already exists in ${luxeStatus ? 'Luxe' : 'Standard'} collection`
+            });
         }
 
         const category = await categoryModel.create({
@@ -21,7 +32,8 @@ const createCategory = async (req, res) => {
             image: image || "",
             // Ensure subCategories is an array if provided, else empty array
             subCategories: subCategories || [],
-            isFeatured: isFeatured || false
+            isFeatured: isFeatured || false,
+            isLuxeCategory: isLuxeCategory || false
         });
 
         return res.status(201).json({
@@ -40,15 +52,23 @@ const createCategory = async (req, res) => {
 // You can use ?featured=true to get only categories meant for the Home Page
 const getAllCategories = async (req, res) => {
     try {
-        const { featured } = req.query;
+        const { featured, type } = req.query;
 
         const query = {};
         if (featured === 'true') {
             query.isFeatured = true;
         }
 
+        // 2. Handle Luxe vs Normal Filter
+        if (type === 'luxury') {
+            query.isLuxeCategory = true;
+        } else if (type === 'normal') {
+            // This query fetches both explicit 'false' and documents missing the field
+            query.isLuxeCategory = { $ne: true };
+        }
+
         const categories = await categoryModel.find(query)
-            .select("name image subCategories isFeatured") // Select only what UI needs
+            .select("name image subCategories isFeatured isLuxeCategory") // Select only what UI needs
             .lean();
 
         return res.json({

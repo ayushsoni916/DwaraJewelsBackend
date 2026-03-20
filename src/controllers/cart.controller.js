@@ -2,6 +2,8 @@ const Cart = require("../models/cart.model");
 const Coupon = require("../models/coupon.model");
 const productModel = require("../models/product.model");
 
+const round2 = (num) => Math.round(num * 100) / 100;
+
 // Helper: Recalculate Totals & Format Response
 const calculateCartResponse = async (cart) => {
     // 1. Filter invalid items (if a product was deleted from DB)
@@ -94,11 +96,11 @@ const calculateCartResponse = async (cart) => {
         coupon: appliedCoupon,
         summary: {
             totalQty,
-            subtotal,
-            discount,
-            tax,
-            shipping,
-            totalCost: Math.max(0, totalCost) // Never negative
+            subtotal: round2(subtotal),
+            discount: round2(discount),
+            tax: round2(tax),
+            shipping: round2(shipping),
+            totalCost: round2(Math.max(0, totalCost))
         }
     };
 };

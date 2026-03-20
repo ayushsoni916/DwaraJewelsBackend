@@ -5,6 +5,7 @@ const productSchema = new mongoose.Schema({
     title: { type: String, required: true }, // "Anes Narrow Diamond Ring..."
     sku: { type: String, required: true, unique: true }, // UI: "Number: 5672..."
     description: { type: String },
+    isLuxe: { type: Boolean, default: false },
 
     // --- Categorization ---
     category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category' }, // e.g., "Rings"

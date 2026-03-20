@@ -6,7 +6,8 @@ const categorySchema = new mongoose.Schema({
     // UI shows "Explore More" sections. 
     // We can add a boolean to feature this category on the home page.
     isFeatured: { type: Boolean, default: false },
-    subCategories: [{ type: String }] // ["Studs", "Jhumkas", "Hoops"]
+    subCategories: [{ type: String }], // ["Studs", "Jhumkas", "Hoops"]
+    isLuxeCategory: { type: Boolean, default: false },
 });
 
-module.exports = mongoose.model('Category',categorySchema)
+module.exports = mongoose.model('Category', categorySchema)
