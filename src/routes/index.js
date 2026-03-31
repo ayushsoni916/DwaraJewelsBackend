@@ -7,6 +7,8 @@ const categoryRouter = require('./category.routes');
 const cartRouter = require('./cart.routes');
 const addressRouter = require('./address.routes');
 const orderRouter = require('./order.routes');
+const wishlistRouter = require('./wishlist.routes');
+const notificationRouter = require('./notification.routes');
 const router = express.Router();
 
 router.use('/auth', authRouter)
@@ -16,4 +18,6 @@ router.use('/category',categoryRouter)
 router.use('/cart', requireAuth, cartRouter)
 router.use('/address', requireAuth, addressRouter);
 router.use('/orders', requireAuth, orderRouter);
+router.use('/wishlist', requireAuth, wishlistRouter);
+router.use('/notifications', notificationRouter);
 module.exports = router;

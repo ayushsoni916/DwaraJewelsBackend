@@ -46,6 +46,36 @@ const requireAuth = async (req, res, next) => {
     }
 }
 
+const optionalAuth = async (req, res, next) => {
+    try {
+        const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+
+        // If no token, just proceed as a guest
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            req.user = null;
+            return next();
+        }
+
+        const token = authHeader.split(' ')[1];
+        try {
+            const payload = verifyToken(token);
+            if (payload && payload.sub) {
+                // We don't necessarily need to query the DB here to save speed, 
+                // just attaching the ID from the token is enough for wishlist checks.
+                req.user = { id: payload.sub };
+            }
+        } catch (error) {
+            // If token is invalid/expired, we treat them as a guest instead of erroring
+            req.user = null;
+        }
+        next();
+    } catch (error) {
+        req.user = null;
+        next();
+    }
+};
+
 module.exports = {
-    requireAuth
+    requireAuth,
+    optionalAuth
 };

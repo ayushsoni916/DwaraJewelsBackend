@@ -1,4 +1,5 @@
 const productModel = require("../models/product.model");
+const wishlistModel = require("../models/wishlist.model");
 
 // 1. Create Product (Admin side - required to populate the DB)
 const createProduct = async (req, res) => {
@@ -106,10 +107,27 @@ const getProducts = async (req, res) => {
         else if (sort === "newest") sortOption = { createdAt: -1 };
         else sortOption = { createdAt: -1 }; // Default to newest
 
-        const products = await productModel.find(query)
+        let products = await productModel.find(query)
             .sort(sortOption)
             .populate("category", "name") // Populate category name for UI
             .lean(); // Faster for read-only
+
+        // --- WISHLIST LOGIC ---
+        if (req.user) {
+            const wishlist = await wishlistModel.findOne({ user: req.user.id });
+            const wishlistedIds = wishlist ? wishlist.products.map(p => p.toString()) : [];
+
+            products = products.map(product => ({
+                ...product,
+                isWishlisted: wishlistedIds.includes(product._id.toString())
+            }));
+        } else {
+            // Guest users see everything as NOT wishlisted
+            products = products.map(product => ({
+                ...product,
+                isWishlisted: false
+            }));
+        }
 
         return res.json({
             success: true,
@@ -139,9 +157,19 @@ const getProductDetails = async (req, res) => {
             return res.status(404).json({ error: "Product not found" });
         }
 
+        // --- WISHLIST LOGIC ---
+        let isWishlisted = false;
+        if (req.user) {
+            const wishlist = await wishlistModel.findOne({ user: req.user.id });
+            if (wishlist) {
+                isWishlisted = wishlist.products.includes(id);
+            }
+        }
+
         return res.json({
             success: true,
-            product
+            product,
+            isWishlisted
         });
     } catch (error) {
         console.error("getProductDetails error", error);
@@ -185,37 +213,6 @@ const getSimilarProducts = async (req, res) => {
         return res.status(500).json({ error: "Internal server error" });
     }
 }
-// // Logic: Finds products in the same category or matching tags, excluding the current one
-// const getSimilarProducts = async (req, res) => {
-//     try {
-//         const { id } = req.params;
-
-//         // First, find the current product to know its category/tags
-//         const currentProduct = await productModel.findById(id);
-
-//         if (!currentProduct) {
-//             return res.status(404).json({ error: "Product not found" });
-//         }
-
-//         const similarProducts = await productModel.find({
-//             category: currentProduct.category,
-//             _id: { $ne: currentProduct._id } // Exclude current product
-//         })
-//             .limit(6) // Limit to 6 items for the UI
-//             .select("title price thumbnail metal") // Select only needed fields for cards
-//             .lean();
-
-//         return res.json({
-//             success: true,
-//             products: similarProducts
-//         });
-
-
-//     } catch (error) {
-//         console.error("getSimilarProducts error", error);
-//         return res.status(500).json({ error: "Internal server error" });
-//     }
-// }
 
 module.exports = {
     createProduct,
