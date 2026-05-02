@@ -7,8 +7,8 @@ const BCRYPT_ROUNDS = 8; // enough for OTP
 
 // generate 6 digits otp
 const generateOtp = () => {
-    return '111111'
-    // return Math.floor(100000 + Math.random() * 900000).toString()
+    // return '111111'
+    return Math.floor(100000 + Math.random() * 900000).toString()
 }
 
 const createOtpForPhone = async (phone) => {

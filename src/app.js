@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const connectDB = require('./config/db');
 const router = require('./routes');
+const cors = require('cors'); // 1. Import CORS
 
 const app = express();
 
@@ -9,7 +10,9 @@ const app = express();
 connectDB();
 
 //Init Middleware
+app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 app.use('/api', router)
 

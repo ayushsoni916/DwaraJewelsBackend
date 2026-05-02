@@ -2,6 +2,39 @@ const User = require("../models/user.model");
 const { generateAccessToken, generateSignupToken, verifySignupToken } = require("../services/jwt.service");
 const { createOtpForPhone, verifyOtpForPhone } = require("../services/otp.service");
 
+const axios = require("axios");
+
+const sendSmsIndiaHub = async (phone, code) => {
+    try {
+        const API_KEY = process.env.SMS_API_KEY;
+        const SENDER_ID = process.env.SMS_SENDER_ID || "SMSHUB";
+
+        // SMS India Hub expects numbers without the '+' prefix
+        const formattedPhone = "91" + phone;
+        const message = `Welcome to the Dwara Jewels powered by SMSINDIAHUB. Your OTP for registration is ${code}`;
+
+        const response = await axios.get("https://cloud.smsindiahub.in/vendorsms/pushsms.aspx", {
+            params: {
+                APIKey: API_KEY,
+                msisdn: formattedPhone,
+                sid: SENDER_ID,
+                msg: message,
+                fl: 0,
+                gwid: 2
+            },
+            timeout: 5000 // 5 second timeout - don't let a slow API hang your server
+        });
+
+        // SMSIndiaHub often returns 200 OK even if the balance is low. 
+        // We log the response data for auditing.
+        return response.data;
+    } catch (error) {
+        // Log the error for monitoring (like Sentry or Datadog)
+        console.error(`SMS Service Error: ${error.message}`);
+        throw new Error("Failed to send SMS gateway request");
+    }
+};
+
 const sendOtp = async (req, res) => {
     try {
         const { phone } = req.body;
@@ -12,15 +45,21 @@ const sendOtp = async (req, res) => {
         const { code, expiresAt } = await createOtpForPhone(phone)
 
         // Here you'd call your SMS provider. For now we log in dev:
-        console.log(`DEV OTP for ${phone}: ${code}, expiresAt=${expiresAt.toISOString()}`);
+        // console.log(`DEV OTP for ${phone}: ${code}, expiresAt=${expiresAt.toISOString()}`);
+
+        await sendSmsIndiaHub(phone, code);
 
         return res.json({
             success: true,
             message: 'OTP sent successfully',
         })
     } catch (error) {
-        console.log('sendOtp error', error)
-        return res.status(500).json({ error: 'Internal server error' });
+        console.error('sendOtp Controller Error:', error);
+        return res.status(500).json({ 
+            success: false, 
+            error: 'Internal server error',
+            message: 'We encountered an issue sending the OTP. Please try again later.' 
+        });
     }
 }
 

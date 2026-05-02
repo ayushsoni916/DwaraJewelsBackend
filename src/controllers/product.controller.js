@@ -1,5 +1,6 @@
 const productModel = require("../models/product.model");
 const wishlistModel = require("../models/wishlist.model");
+const cloudinary = require("../config/cloudinary");
 
 // 1. Create Product (Admin side - required to populate the DB)
 const createProduct = async (req, res) => {
@@ -15,16 +16,29 @@ const createProduct = async (req, res) => {
             metal, // Object: { type, quality, color, weight }
             stones, // Array of objects
             dimensions,
-            images,
-            thumbnail,
             tags,
             isNewArrival,
-            isLuxe
+            isLuxe,
+            stock
         } = req.body;
 
-        // Basic validation
-        if (!title || !sku || !price || !price.finalPrice || !category) {
-            return res.status(400).json({ error: "Title, SKU, Price, and Category are required" });
+        const parsedPrice = typeof price === 'string' ? JSON.parse(price) : price;
+        const parsedMetal = typeof metal === 'string' ? JSON.parse(metal) : metal;
+        const parsedStones = typeof stones === 'string' ? JSON.parse(stones) : stones;
+        const parsedDimensions = typeof dimensions === 'string' ? JSON.parse(dimensions) : dimensions;
+        const parsedTags = typeof tags === 'string' ? tags.split(',').map(t => t.trim()) : tags;
+
+        if (!title || !sku || !parsedPrice || !parsedPrice.finalPrice || !category) {
+            return res.status(400).json({ 
+                error: "Title, SKU, Price, and Category are required",
+                received: { title, sku, category, hasPrice: !!parsedPrice, finalPrice: parsedPrice?.finalPrice }
+            });
+        }
+
+
+        const files = req.files; // Expecting array from multer: upload.array('images')
+        if (!files || files.length === 0) {
+            return res.status(400).json({ error: "At least one product image is required" });
         }
 
         // Check if SKU already exists
@@ -33,6 +47,29 @@ const createProduct = async (req, res) => {
             return res.status(400).json({ error: "Product with this SKU already exists" });
         }
 
+        // 1. Upload Gallery to Cloudinary
+        const uploadPromises = files.map(file => {
+            return new Promise((resolve, reject) => {
+                const stream = cloudinary.uploader.upload_stream(
+                    { folder: "dwara_products" },
+                    (err, result) => {
+                        if (err) reject(err);
+                        else resolve({ url: result.secure_url, publicId: result.public_id });
+                    }
+                );
+                stream.end(file.buffer);
+            });
+        });
+
+        const uploadedResults = await Promise.all(uploadPromises);
+
+        // 2. Map results for both live app (Strings) and admin management (Objects)
+        const imageUrls = uploadedResults.map(img => img.url);
+        const thumbnail = imageUrls[0]; // First image is the thumbnail
+
+
+
+
         const product = await productModel.create({
             title,
             sku,
@@ -40,15 +77,17 @@ const createProduct = async (req, res) => {
             category,
             subCategory,
             collection,
-            price,
-            metal,
-            stones,
-            dimensions,
-            images,
-            thumbnail,
-            tags,
-            isNewArrival,
-            isLuxe: isLuxe || false
+            price: parsedPrice,
+            metal: parsedMetal,
+            stones: parsedStones,
+            dimensions: parsedDimensions,
+            images: imageUrls,      // String array for frontend
+            thumbnail: thumbnail,   // String for frontend
+            imageDetails: uploadedResults, // Object array for backend management
+            tags: parsedTags,
+            isNewArrival: isNewArrival === 'true' || isNewArrival === true,
+            isLuxe: isLuxe === 'true' || isLuxe === true,
+            stock: parseInt(stock) || 0
         });
 
         return res.status(201).json({

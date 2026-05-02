@@ -9,6 +9,7 @@ const addressRouter = require('./address.routes');
 const orderRouter = require('./order.routes');
 const wishlistRouter = require('./wishlist.routes');
 const notificationRouter = require('./notification.routes');
+const collectionRouter = require('./collection.route');
 const router = express.Router();
 
 router.use('/auth', authRouter)
@@ -20,4 +21,5 @@ router.use('/address', requireAuth, addressRouter);
 router.use('/orders', requireAuth, orderRouter);
 router.use('/wishlist', requireAuth, wishlistRouter);
 router.use('/notifications', notificationRouter);
+router.use('/collection', collectionRouter);
 module.exports = router;

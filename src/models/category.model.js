@@ -2,9 +2,10 @@ const { default: mongoose } = require("mongoose");
 
 const categorySchema = new mongoose.Schema({
     name: { type: String, required: true }, // "Earrings"
-    image: { type: String },
-    // UI shows "Explore More" sections. 
-    // We can add a boolean to feature this category on the home page.
+    image: {
+        url: { type: String, required: true },
+        publicId: { type: String, required: true }
+    },
     isFeatured: { type: Boolean, default: false },
     subCategories: [{ type: String }], // ["Studs", "Jhumkas", "Hoops"]
     isLuxeCategory: { type: Boolean, default: false },

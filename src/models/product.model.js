@@ -6,11 +6,12 @@ const productSchema = new mongoose.Schema({
     sku: { type: String, required: true, unique: true }, // UI: "Number: 5672..."
     description: { type: String },
     isLuxe: { type: Boolean, default: false },
+    stock: { type: Number, default: 0 },
 
     // --- Categorization ---
     category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category' }, // e.g., "Rings"
     subCategory: { type: String }, // UI: The "Narrow" label under the image
-    collection: { type: String }, // UI: "Sunshine Signature Collection"
+    collection: { type: mongoose.Schema.Types.ObjectId, ref: 'Collection' }, // UI: "Sunshine Signature Collection"
 
     // --- Pricing (The "Price Distribution" Accordion) ---
     price: {
@@ -49,6 +50,10 @@ const productSchema = new mongoose.Schema({
     // --- Media ---
     images: [{ type: String }], // Gallery
     thumbnail: { type: String }, // For listing pages
+    imageDetails: [{ // New field for Admin to manage Cloudinary deletions
+        url: String,
+        publicId: String
+    }],
 
     // --- Recommendation Engine ---
     tags: [{ type: String }], // ["bridal", "minimal", "gift"]

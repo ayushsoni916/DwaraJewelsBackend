@@ -1,15 +1,19 @@
 // 1. Create Category (Admin Only)
 
 const categoryModel = require("../models/category.model");
+const cloudinary = require("../config/cloudinary");
 
 // Use this to populate "Earrings", "Rings", etc.
 const createCategory = async (req, res) => {
     try {
-        const { name, image, subCategories, isFeatured, isLuxeCategory } = req.body;
+        const { name, subCategories, isFeatured, isLuxeCategory } = req.body;
+        const file = req.file;
 
         if (!name) {
             return res.status(400).json({ error: "Category name is required" });
         }
+
+        if (!file) return res.status(400).json({ error: "Category image is required" });
 
         // 1. Normalize the luxe flag (Old categories without this var are treated as false)
         const luxeStatus = isLuxeCategory || false;
@@ -27,13 +31,29 @@ const createCategory = async (req, res) => {
             });
         }
 
+        // --- Cloudinary Upload Logic ---
+        const uploadedImage = await new Promise((resolve, reject) => {
+            const stream = cloudinary.uploader.upload_stream(
+                { folder: "dwara_categories" },
+                (err, result) => {
+                    if (err) reject(err);
+                    else resolve({ url: result.secure_url, publicId: result.public_id });
+                }
+            );
+            stream.end(file.buffer);
+        });
+
+        // / Parse subCategories if they come as a string (common with FormData)
+        const parsedSubs = typeof subCategories === 'string'
+            ? subCategories.split(',').map(s => s.trim())
+            : subCategories;
+
         const category = await categoryModel.create({
             name,
-            image: image || "",
-            // Ensure subCategories is an array if provided, else empty array
-            subCategories: subCategories || [],
-            isFeatured: isFeatured || false,
-            isLuxeCategory: isLuxeCategory || false
+            image: uploadedImage, // Now contains { url, publicId }
+            subCategories: parsedSubs || [],
+            isFeatured: isFeatured === 'true' || isFeatured === true,
+            isLuxeCategory: luxeStatus
         });
 
         return res.status(201).json({
