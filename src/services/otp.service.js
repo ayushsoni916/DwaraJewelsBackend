@@ -13,7 +13,7 @@ const generateOtp = () => {
 
 const createOtpForPhone = async (phone) => {
     console.log(`Creating OTP for phone: ${phone}`);
-    const code = phone == '9166033002' ? generateOtp() : '111111'; // for testing, you can set a fixed OTP for a specific phone number
+    const code = phone == "9166033002" ? generateOtp() : '111111'; // for testing, you can set a fixed OTP for a specific phone number
     console.log(`Generated OTP: ${code} for phone: ${phone}`);
     const expiresAt = new Date(Date.now() + OTP_TTL_MS)
 
