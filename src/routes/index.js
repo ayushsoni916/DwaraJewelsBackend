@@ -13,7 +13,7 @@ const collectionRouter = require('./collection.route');
 const router = express.Router();
 
 router.use('/auth', authRouter)
-router.use('/banners', requireAuth, bannerRouter);
+router.use('/banners', bannerRouter);
 router.use('/product',productRouter)
 router.use('/category',categoryRouter)
 router.use('/cart', requireAuth, cartRouter)
