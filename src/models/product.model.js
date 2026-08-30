@@ -67,4 +67,10 @@ const productSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
+productSchema.index({
+    title: 'text',
+    tags: 'text',
+    description: 'text' // Added description so users can search by keywords in the description
+});
+
 module.exports = mongoose.model('Product', productSchema);

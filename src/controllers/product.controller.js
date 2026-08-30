@@ -29,7 +29,7 @@ const createProduct = async (req, res) => {
         const parsedTags = typeof tags === 'string' ? tags.split(',').map(t => t.trim()) : tags;
 
         if (!title || !sku || !parsedPrice || !parsedPrice.finalPrice || !category) {
-            return res.status(400).json({ 
+            return res.status(400).json({
                 error: "Title, SKU, Price, and Category are required",
                 received: { title, sku, category, hasPrice: !!parsedPrice, finalPrice: parsedPrice?.finalPrice }
             });
@@ -107,7 +107,8 @@ const createProduct = async (req, res) => {
 // Supports filters: ?category=ID & ?minPrice=100 & ?maxPrice=500 & ?sort=newest
 const getProducts = async (req, res) => {
     try {
-        const { category, subCategory, minPrice, maxPrice, sort, search, luxe } = req.query;
+        // 1. Added isNewArrival and limit to destructuring
+        const { category, subCategory, minPrice, maxPrice, sort, search, luxe, collection, isNewArrival, limit, metal, stone, size } = req.query;
 
         // Build dynamic query object
         let query = {};
@@ -118,6 +119,15 @@ const getProducts = async (req, res) => {
 
         if (subCategory) {
             query.subCategory = subCategory;
+        }
+
+        if (collection) {
+            query.collection = collection;
+        }
+
+        // --- New Arrival Filter Logic ---
+        if (isNewArrival === 'true') {
+            query.isNewArrival = true;
         }
 
         // --- Luxe Filter Logic ---
@@ -134,9 +144,31 @@ const getProducts = async (req, res) => {
             if (maxPrice) query["price.finalPrice"].$lte = Number(maxPrice);
         }
 
+        // --- Dynamic Sidebar Filters ---
+        if (metal) {
+            // Matches the enum in your schema: metal.type
+            query["metal.type"] = metal;
+        }
+
+        if (stone) {
+            // MongoDB is smart enough to search inside the stones array for this type
+            query["stones.type"] = stone;
+        }
+
+        if (size) {
+            query["dimensions.size"] = size;
+        }
+
         if (search) {
-            // requires text index in schema: productSchema.index({ title: 'text', tags: 'text' });
-            query.$text = { $search: search };
+            // Wrap the search term with word boundaries (\b) to prevent matching parts of words like "featuring"
+            const searchRegex = new RegExp(`\\b${search}\\b`, 'i');
+
+            // Apply it to your query fields (e.g., title, description, tags)
+            query.$or = [
+                { title: { $regex: searchRegex } },
+                { description: { $regex: searchRegex } },
+                { tags: { $regex: searchRegex } }
+            ];
         }
 
         // Handle Sorting
@@ -146,10 +178,20 @@ const getProducts = async (req, res) => {
         else if (sort === "newest") sortOption = { createdAt: -1 };
         else sortOption = { createdAt: -1 }; // Default to newest
 
-        let products = await productModel.find(query)
+        // 2. Build the base Mongoose query WITHOUT executing it immediately
+        let dbQuery = productModel.find(query)
             .sort(sortOption)
             .populate("category", "name") // Populate category name for UI
+            .populate("collection", "name") // Populate collection name for UI
             .lean(); // Faster for read-only
+
+        // 3. Apply Limit if it exists in the query parameters
+        if (limit) {
+            dbQuery = dbQuery.limit(parseInt(limit, 10));
+        }
+
+        // 4. Execute the query
+        let products = await dbQuery;
 
         // --- WISHLIST LOGIC ---
         if (req.user) {
