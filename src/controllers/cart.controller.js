@@ -384,7 +384,7 @@ const applyCoupon = async (req, res) => {
 
         if (subtotal < coupon.minOrderValue) {
             return res.status(400).json({
-                error: `This coupon requires a minimum order of ₹${coupon.minOrderValue}`
+                error: `This coupon requires a minimum order of Rs. ${coupon.minOrderValue}`
             });
         }
 

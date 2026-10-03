@@ -17,6 +17,7 @@ const productSchema = new mongoose.Schema({
     price: {
         basePrice: { type: Number }, // Raw cost
         makingCharges: { type: Number },
+        compareAtPrice: { type: Number },
         tax: { type: Number },
         finalPrice: { type: Number, required: true }, // UI: $699.00
         currency: { type: String, default: 'USD' }

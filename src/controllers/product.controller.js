@@ -107,11 +107,24 @@ const createProduct = async (req, res) => {
 // Supports filters: ?category=ID & ?minPrice=100 & ?maxPrice=500 & ?sort=newest
 const getProducts = async (req, res) => {
     try {
-        // 1. Added isNewArrival and limit to destructuring
-        const { category, subCategory, minPrice, maxPrice, sort, search, luxe, collection, isNewArrival, limit, metal, stone, size } = req.query;
+        const {
+            category,
+            subCategory,
+            minPrice,
+            maxPrice,
+            sort,
+            search,
+            luxe,
+            collection,
+            isNewArrival,
+            limit,
+            page,
+            metal,
+            stone,
+            size
+        } = req.query;
 
-        // Build dynamic query object
-        let query = {};
+        const query = {};
 
         if (category) {
             query.category = category;
@@ -125,33 +138,35 @@ const getProducts = async (req, res) => {
             query.collection = collection;
         }
 
-        // --- New Arrival Filter Logic ---
-        if (isNewArrival === 'true') {
+        if (isNewArrival === "true") {
             query.isNewArrival = true;
+        } else if (isNewArrival === "false") {
+            query.isNewArrival = { $ne: true };
         }
 
-        // --- Luxe Filter Logic ---
-        if (luxe === 'true') {
+        if (luxe === "true") {
             query.isLuxe = true;
-        } else if (luxe === 'false') {
-            // Fetches products where isLuxe is false OR the field is missing (legacy data)
+        } else if (luxe === "false") {
             query.isLuxe = { $ne: true };
         }
 
         if (minPrice || maxPrice) {
             query["price.finalPrice"] = {};
-            if (minPrice) query["price.finalPrice"].$gte = Number(minPrice);
-            if (maxPrice) query["price.finalPrice"].$lte = Number(maxPrice);
+
+            if (minPrice) {
+                query["price.finalPrice"].$gte = Number(minPrice);
+            }
+
+            if (maxPrice) {
+                query["price.finalPrice"].$lte = Number(maxPrice);
+            }
         }
 
-        // --- Dynamic Sidebar Filters ---
         if (metal) {
-            // Matches the enum in your schema: metal.type
             query["metal.type"] = metal;
         }
 
         if (stone) {
-            // MongoDB is smart enough to search inside the stones array for this type
             query["stones.type"] = stone;
         }
 
@@ -159,69 +174,125 @@ const getProducts = async (req, res) => {
             query["dimensions.size"] = size;
         }
 
-        if (search) {
-            // Wrap the search term with word boundaries (\b) to prevent matching parts of words like "featuring"
-            const searchRegex = new RegExp(`\\b${search}\\b`, 'i');
+        // Partial search: "rin" will match "ring"
+        if (search?.trim()) {
+            const escapedSearch = search
+                .trim()
+                .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-            // Apply it to your query fields (e.g., title, description, tags)
+            const searchRegex = new RegExp(escapedSearch, "i");
+
             query.$or = [
                 { title: { $regex: searchRegex } },
                 { description: { $regex: searchRegex } },
-                { tags: { $regex: searchRegex } }
+                { tags: { $regex: searchRegex } },
+                { sku: { $regex: searchRegex } },
+                { subCategory: { $regex: searchRegex } },
+                { "metal.type": { $regex: searchRegex } },
+                { "metal.quality": { $regex: searchRegex } },
+                { "metal.color": { $regex: searchRegex } },
+                { "stones.type": { $regex: searchRegex } },
+                { "stones.shape": { $regex: searchRegex } }
             ];
         }
 
-        // Handle Sorting
-        let sortOption = {};
-        if (sort === "price_low_high") sortOption = { "price.finalPrice": 1 };
-        else if (sort === "price_high_low") sortOption = { "price.finalPrice": -1 };
-        else if (sort === "newest") sortOption = { createdAt: -1 };
-        else sortOption = { createdAt: -1 }; // Default to newest
+        let sortOption = { createdAt: -1 };
 
-        // 2. Build the base Mongoose query WITHOUT executing it immediately
-        let dbQuery = productModel.find(query)
-            .sort(sortOption)
-            .populate("category", "name") // Populate category name for UI
-            .populate("collection", "name") // Populate collection name for UI
-            .lean(); // Faster for read-only
-
-        // 3. Apply Limit if it exists in the query parameters
-        if (limit) {
-            dbQuery = dbQuery.limit(parseInt(limit, 10));
+        if (sort === "price_low_high") {
+            sortOption = { "price.finalPrice": 1 };
+        } else if (sort === "price_high_low") {
+            sortOption = { "price.finalPrice": -1 };
+        } else if (sort === "oldest") {
+            sortOption = { createdAt: 1 };
         }
 
-        // 4. Execute the query
-        let products = await dbQuery;
+        // Pagination is only applied when page or limit is supplied
+        const shouldPaginate =
+            page !== undefined || limit !== undefined;
 
-        // --- WISHLIST LOGIC ---
+        const pageNumber = Math.max(
+            parseInt(page, 10) || 1,
+            1
+        );
+
+        const pageSize = Math.min(
+            Math.max(parseInt(limit, 10) || 8, 1),
+            50
+        );
+
+        let dbQuery = productModel
+            .find(query)
+            .sort(sortOption)
+            .populate("category", "name")
+            .populate("collection", "name")
+            .lean();
+
+        if (shouldPaginate) {
+            dbQuery = dbQuery
+                .skip((pageNumber - 1) * pageSize)
+                .limit(pageSize);
+        }
+
+        const [total, fetchedProducts] = await Promise.all([
+            productModel.countDocuments(query),
+            dbQuery
+        ]);
+
+        let products = fetchedProducts;
+
         if (req.user) {
-            const wishlist = await wishlistModel.findOne({ user: req.user.id });
-            const wishlistedIds = wishlist ? wishlist.products.map(p => p.toString()) : [];
+            const wishlist = await wishlistModel
+                .findOne({ user: req.user.id })
+                .select("products")
+                .lean();
+
+            const wishlistedIds = new Set(
+                (wishlist?.products || []).map(productId =>
+                    productId.toString()
+                )
+            );
 
             products = products.map(product => ({
                 ...product,
-                isWishlisted: wishlistedIds.includes(product._id.toString())
+                isWishlisted: wishlistedIds.has(
+                    product._id.toString()
+                )
             }));
         } else {
-            // Guest users see everything as NOT wishlisted
             products = products.map(product => ({
                 ...product,
                 isWishlisted: false
             }));
         }
 
-        return res.json({
+        const totalPages = shouldPaginate
+            ? Math.ceil(total / pageSize)
+            : total > 0
+                ? 1
+                : 0;
+
+        const hasMore = shouldPaginate
+            ? pageNumber * pageSize < total
+            : false;
+
+        return res.status(200).json({
             success: true,
             count: products.length,
+            total,
+            page: pageNumber,
+            limit: shouldPaginate ? pageSize : total,
+            totalPages,
+            hasMore,
             products
         });
-
-
     } catch (error) {
-        console.error("getProducts error", error);
-        return res.status(500).json({ error: "Internal server error" });
+        console.error("getProducts error:", error);
+
+        return res.status(500).json({
+            error: "Internal server error"
+        });
     }
-}
+};
 
 // 3. Get Single Product (For "Product Inner" Page)
 const getProductDetails = async (req, res) => {
@@ -232,7 +303,10 @@ const getProductDetails = async (req, res) => {
             return res.status(400).json({ error: "Product ID is required" });
         }
 
-        const product = await productModel.findById(id).populate("category");
+        const product = await productModel
+            .findById(id)
+            .populate("category")
+            .populate("collection", "name");
 
         if (!product) {
             return res.status(404).json({ error: "Product not found" });
