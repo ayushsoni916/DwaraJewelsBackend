@@ -2,6 +2,24 @@ const productModel = require("../models/product.model");
 const wishlistModel = require("../models/wishlist.model");
 const cloudinary = require("../config/cloudinary");
 
+const addTotalStock = (product) => {
+    const data = typeof product.toObject === 'function'
+        ? product.toObject()
+        : { ...product };
+
+    // Exclude any old top-level stock still stored in MongoDB.
+    delete data.stock;
+
+    data.totalStock = Array.isArray(data.dimensions)
+        ? data.dimensions.reduce(
+            (total, option) => total + Number(option.stock ?? 0),
+            0
+        )
+        : 0;
+
+    return data;
+};
+
 // 1. Create Product (Admin side - required to populate the DB)
 const createProduct = async (req, res) => {
     try {
@@ -19,7 +37,7 @@ const createProduct = async (req, res) => {
             tags,
             isNewArrival,
             isLuxe,
-            stock
+            // stock
         } = req.body;
 
         const parsedPrice = typeof price === 'string' ? JSON.parse(price) : price;
@@ -27,6 +45,12 @@ const createProduct = async (req, res) => {
         const parsedStones = typeof stones === 'string' ? JSON.parse(stones) : stones;
         const parsedDimensions = typeof dimensions === 'string' ? JSON.parse(dimensions) : dimensions;
         const parsedTags = typeof tags === 'string' ? tags.split(',').map(t => t.trim()) : tags;
+
+        if (!Array.isArray(parsedDimensions) || parsedDimensions.length === 0) {
+            return res.status(400).json({
+                error: "At least one dimension option with stock is required"
+            });
+        }
 
         if (!title || !sku || !parsedPrice || !parsedPrice.finalPrice || !category) {
             return res.status(400).json({
@@ -87,7 +111,7 @@ const createProduct = async (req, res) => {
             tags: parsedTags,
             isNewArrival: isNewArrival === 'true' || isNewArrival === true,
             isLuxe: isLuxe === 'true' || isLuxe === true,
-            stock: parseInt(stock) || 0
+            // stock: parseInt(stock) || 0
         });
 
         return res.status(201).json({
@@ -238,7 +262,7 @@ const getProducts = async (req, res) => {
             dbQuery
         ]);
 
-        let products = fetchedProducts;
+        let products = fetchedProducts.map(addTotalStock);
 
         if (req.user) {
             const wishlist = await wishlistModel
@@ -323,7 +347,7 @@ const getProductDetails = async (req, res) => {
 
         return res.json({
             success: true,
-            product,
+            product: addTotalStock(product),
             isWishlisted
         });
     } catch (error) {

@@ -6,7 +6,6 @@ const productSchema = new mongoose.Schema({
     sku: { type: String, required: true, unique: true }, // UI: "Number: 5672..."
     description: { type: String },
     isLuxe: { type: Boolean, default: false },
-    stock: { type: Number, default: 0 },
 
     // --- Categorization ---
     category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category' }, // e.g., "Rings"
@@ -42,11 +41,21 @@ const productSchema = new mongoose.Schema({
     }],
 
     // --- Dimensions (The "Details" Accordion) ---
-    dimensions: {
-        width: { type: String },  // UI: "0.75 inches"
-        length: { type: String }, // UI: "Adjustable"
-        size: { type: String }    // Ring size (6, 7, 8)
-    },
+    dimensions: [{
+        width: { type: String, trim: true },
+        length: { type: String, trim: true },
+        size: { type: String, trim: true },
+        stock: {
+            type: Number,
+            required: true,
+            default: 0,
+            min: [0, 'Stock cannot be negative'],
+            validate: {
+                validator: Number.isInteger,
+                message: 'Stock must be a whole number',
+            },
+        },
+    }],
 
     // --- Media ---
     images: [{ type: String }], // Gallery
