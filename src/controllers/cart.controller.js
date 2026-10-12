@@ -2,6 +2,9 @@ const Cart = require("../models/cart.model");
 const Coupon = require("../models/coupon.model");
 const productModel = require("../models/product.model");
 
+const isValidObjectId = value =>
+    typeof value === 'string' && /^[a-f0-9]{24}$/i.test(value);
+
 const round2 = (num) => Math.round(num * 100) / 100;
 
 // Helper: Recalculate Totals & Format Response
@@ -28,12 +31,19 @@ const calculateCartResponse = async (cart) => {
 
     // 2. Map items to format & calculate subtotal
     const formattedItems = cart.items.map(item => {
-        // LIVE PRICE CHECK: Always use the current product price
         const currentPrice = item.product.price?.finalPrice || 0;
         const itemTotal = currentPrice * item.quantity;
 
         totalQty += item.quantity;
         subtotal += itemTotal;
+
+        const dimensions = Array.isArray(item.product.dimensions)
+            ? item.product.dimensions
+            : [];
+
+        const selectedDimension = dimensions.find(
+            option => option._id.toString() === item.dimensionId?.toString()
+        );
 
         return {
             _id: item._id,
@@ -42,8 +52,10 @@ const calculateCartResponse = async (cart) => {
             thumbnail: item.product.thumbnail,
             price: currentPrice,
             quantity: item.quantity,
-            size: item.size,
-            itemTotal: itemTotal
+            dimensionId: item.dimensionId || null,
+            size: selectedDimension?.size || null,
+            dimensions,
+            itemTotal,
         };
     });
 
@@ -107,90 +119,84 @@ const calculateCartResponse = async (cart) => {
 
 const addToCart = async (req, res) => {
     try {
-        const { productId, quantity, size } = req.body;
-        const userId = req.user.id
+        const { productId, dimensionId, quantity = 1 } = req.body;
+        const qty = Number(quantity);
 
-        if (!productId) {
-            return res.status(400).json({ error: "Product ID is required" });
+        if (!isValidObjectId(productId) || !isValidObjectId(dimensionId)) {
+            return res.status(400).json({
+                error: "Valid productId and dimensionId are required"
+            });
         }
 
-        // Validate quantity (default to 1 if not sent)
-        const qty = quantity ? parseInt(quantity) : 1;
-        const incomingSize = size !== undefined && size !== null ? String(size) : null;
-
-        if (qty < 1) {
-            return res.status(400).json({ error: "Quantity must be at least 1" });
+        if (!Number.isSafeInteger(qty) || qty < 1) {
+            return res.status(400).json({
+                error: "Quantity must be a positive whole number"
+            });
         }
 
-        // Check if product exists and has stock
         const product = await productModel.findById(productId);
+
         if (!product) {
             return res.status(404).json({ error: "Product not found" });
         }
-        // TODO: Add stock check here (if stock < qty, throw error)
 
-        // Find existing cart for user
-        let cart = await Cart.findOne({ user: userId });
-        let msg = '';
+        const dimension = (
+            Array.isArray(product.dimensions) ? product.dimensions : []
+        ).find(option => option._id.toString() === dimensionId);
+
+        if (!dimension) {
+            return res.status(400).json({
+                error: "Selected dimension not found"
+            });
+        }
+
+        let cart = await Cart.findOne({ user: req.user.id });
 
         if (!cart) {
-            // --- SCENARIO 1: No Cart exists, create new one ---
-            console.log("Creating new cart for user:", userId);
-            cart = await Cart.create({
-                user: userId,
-                items: [{
-                    product: productId,
-                    quantity: qty,
-                    size: incomingSize
-                }]
-            })
-            msg = 'Product added to cart successfully';
+            cart = new Cart({ user: req.user.id, items: [] });
         }
-        else {
-            // --- SCENARIO 2: Cart exists ---
 
-            // Check if this specific product (AND size) is already in cart
-            console.log("Updating existing cart for user:", userId);
-            const itemIndex = cart.items.findIndex(item => {
-                const isSameProduct = item.product.toString() === productId;
+        const existingItem = cart.items.find(item =>
+            item.product.toString() === productId &&
+            item.dimensionId?.toString() === dimensionId
+        );
 
-                // Ensure the DB value is also treated as a string for comparison
-                const dbSize = item.size !== undefined && item.size !== null ? String(item.size) : null;
+        const nextQuantity = (existingItem?.quantity || 0) + qty;
 
-                return isSameProduct && (dbSize === incomingSize);
+        if (nextQuantity > Number(dimension.stock ?? 0)) {
+            return res.status(400).json({
+                error: "Not enough stock for this size / dimension"
             });
-
-            if (itemIndex > -1) {
-                // Item exists: Update quantity
-                cart.items[itemIndex].quantity += qty;
-                console.log("Updated item quantity in cart");
-                msg = 'Product quantity updated in cart successfully';
-            } else {
-                // Item doesn't exist: Push new item
-                cart.items.push({
-                    product: productId,
-                    quantity: qty,
-                    size: incomingSize
-                });
-                console.log("Added new item to cart");
-                msg = 'Product added to cart successfully';
-            }
-
-            await cart.save();
         }
 
-        console.log("Cart after operation:", cart);
+        if (existingItem) {
+            existingItem.quantity = nextQuantity;
+            existingItem.size = dimension.size || null;
+        } else {
+            cart.items.push({
+                product: productId,
+                dimensionId: dimension._id,
+                quantity: qty,
+                size: dimension.size || null,
+            });
+        }
+
+        await cart.save();
+        await cart.populate(
+            'items.product',
+            'title price thumbnail dimensions'
+        );
 
         return res.status(200).json({
             success: true,
-            message: msg
+            message: "Product added to cart successfully",
+            cart: await calculateCartResponse(cart),
         });
-    }
-    catch (error) {
+    } catch (error) {
         console.error("addToCart error", error);
         return res.status(500).json({ error: "Internal server error" });
     }
-}
+};
 
 const getCart = async (req, res) => {
     try {
@@ -200,9 +206,9 @@ const getCart = async (req, res) => {
 
         const cart = await Cart.findOne({ user: userId })
             .populate({
-                'path': 'items.product',
-                'select': 'title price thumbnail quantity'
-            })
+                path: 'items.product',
+                select: 'title price thumbnail dimensions'
+            });
 
         if (!cart) {
             return res.status(200).json({
@@ -274,31 +280,103 @@ const getCart = async (req, res) => {
 // 3. Update Cart Item (Increment/Decrement)
 const updateCartItem = async (req, res) => {
     try {
-        const userId = req.user.id;
-        const { itemId, type } = req.body; // type: 'increment' or 'decrement'
+        const { itemId, type, dimensionId } = req.body;
 
-        // Populate is needed because calculateCartResponse relies on product details
-        const cart = await Cart.findOne({ user: userId }).populate({
+        const cart = await Cart.findOne({ user: req.user.id }).populate({
             path: 'items.product',
-            select: 'title price thumbnail quantity'
+            select: 'title price thumbnail dimensions',
         });
 
-        if (!cart) return res.status(404).json({ error: "Cart not found" });
+        if (!cart) {
+            return res.status(404).json({ error: "Cart not found" });
+        }
 
-        // Find the item using the Cart Item _id (not Product ID)
-        const itemIndex = cart.items.findIndex(item => item._id.toString() === itemId);
+        const item = cart.items.find(
+            entry => entry._id.toString() === itemId
+        );
 
-        if (itemIndex === -1) {
+        if (!item) {
             return res.status(404).json({ error: "Item not found in cart" });
         }
 
-        if (type === 'increment') {
-            cart.items[itemIndex].quantity += 1;
-        } else if (type === 'decrement') {
-            if (cart.items[itemIndex].quantity > 1) {
-                cart.items[itemIndex].quantity -= 1;
+        if (!item.product) {
+            return res.status(404).json({ error: "Product not found" });
+        }
+
+        const dimensions = Array.isArray(item.product.dimensions)
+            ? item.product.dimensions
+            : [];
+
+        if (type === 'decrement') {
+            if (item.quantity <= 1) {
+                return res.status(400).json({
+                    error: "Quantity cannot be less than 1"
+                });
+            }
+
+            item.quantity -= 1;
+        } else if (type === 'increment') {
+            const dimension = dimensions.find(
+                option =>
+                    option._id.toString() === item.dimensionId?.toString()
+            );
+
+            if (!dimension) {
+                return res.status(400).json({
+                    error: "Choose a size / dimension first"
+                });
+            }
+
+            if (item.quantity + 1 > Number(dimension.stock ?? 0)) {
+                return res.status(400).json({
+                    error: "Not enough stock for this size / dimension"
+                });
+            }
+
+            item.quantity += 1;
+        } else if (type === 'change_dimension') {
+            if (!isValidObjectId(dimensionId)) {
+                return res.status(400).json({
+                    error: "Valid dimensionId is required"
+                });
+            }
+
+            const dimension = dimensions.find(
+                option => option._id.toString() === dimensionId
+            );
+
+            if (!dimension) {
+                return res.status(400).json({
+                    error: "Selected dimension not found"
+                });
+            }
+
+            // Merge if this product + dimension already exists in the cart.
+            const existingItem = cart.items.find(entry =>
+                entry._id.toString() !== itemId &&
+                entry.product?._id.toString() === item.product._id.toString() &&
+                entry.dimensionId?.toString() === dimensionId
+            );
+
+            const nextQuantity =
+                item.quantity + (existingItem?.quantity || 0);
+
+            if (nextQuantity > Number(dimension.stock ?? 0)) {
+                return res.status(400).json({
+                    error: "Not enough stock for this size / dimension"
+                });
+            }
+
+            if (existingItem) {
+                existingItem.quantity = nextQuantity;
+                existingItem.size = dimension.size || null;
+
+                cart.items = cart.items.filter(
+                    entry => entry._id.toString() !== itemId
+                );
             } else {
-                return res.status(400).json({ error: "Quantity cannot be less than 1" });
+                item.dimensionId = dimension._id;
+                item.size = dimension.size || null;
             }
         } else {
             return res.status(400).json({ error: "Invalid update type" });
@@ -306,15 +384,11 @@ const updateCartItem = async (req, res) => {
 
         await cart.save();
 
-        // Return the updated summary so frontend updates instantly
-        const cartResponse = await calculateCartResponse(cart);
-
         return res.status(200).json({
             success: true,
             message: "Cart updated successfully",
-            cart: cartResponse
+            cart: await calculateCartResponse(cart),
         });
-
     } catch (error) {
         console.error("updateCartItem error", error);
         return res.status(500).json({ error: "Internal server error" });
@@ -330,7 +404,7 @@ const removeCartItem = async (req, res) => {
 
         const cart = await Cart.findOne({ user: userId }).populate({
             path: 'items.product',
-            select: 'title price thumbnail quantity'
+            select: 'title price thumbnail dimensions'
         });
 
         if (!cart) return res.status(404).json({ error: "Cart not found" });

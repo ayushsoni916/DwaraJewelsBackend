@@ -13,7 +13,11 @@ categoryRouter.get('/', getAllCategories); // Fetch tabs (Earrings, Rings, etc.)
 // Admin Routes
 // Note: Add middleware here later to protect these
 categoryRouter.post('/', upload.single('image'), createCategory);
-categoryRouter.put('/:id', updateCategory);
+categoryRouter.put(
+    '/:id',
+    upload.single('image'),
+    updateCategory
+);
 categoryRouter.delete('/:id', deleteCategory);
 
 module.exports = categoryRouter;

@@ -34,51 +34,127 @@ exports.toggleWishlist = async (req, res) => {
 // 2. Move to Cart
 exports.moveToCart = async (req, res) => {
     try {
-        const { productId, quantity, size } = req.body;
+        const { productId, dimensionId, quantity = 1 } = req.body;
         const userId = req.user.id;
 
-        // --- STEP A: ADD TO CART (Reusing your logic) ---
-        const qty = quantity ? parseInt(quantity) : 1;
-        const incomingSize = size !== undefined && size !== null ? String(size) : null;
+        const validId = value =>
+            typeof value === 'string' && /^[a-f\d]{24}$/i.test(value);
 
-        const product = await productModel.findById(productId);
-        if (!product) return res.status(404).json({ error: "Product not found" });
-
-        let cart = await Cart.findOne({ user: userId });
-
-        if (!cart) {
-            cart = await Cart.create({
-                user: userId,
-                items: [{ product: productId, quantity: qty, size: incomingSize }]
+        if (!validId(productId) || !validId(dimensionId)) {
+            return res.status(400).json({
+                error: "Valid productId and dimensionId are required"
             });
-        } else {
-            const itemIndex = cart.items.findIndex(item => {
-                return item.product.toString() === productId && 
-                       (String(item.size) === incomingSize);
-            });
-
-            if (itemIndex > -1) {
-                cart.items[itemIndex].quantity += qty;
-            } else {
-                cart.items.push({ product: productId, quantity: qty, size: incomingSize });
-            }
-            await cart.save();
         }
 
-        // --- STEP B: REMOVE FROM WISHLIST ---
-        await Wishlist.findOneAndUpdate(
-            { user: userId },
-            { $pull: { products: productId } }
-        );
+        const qty = Number(quantity);
 
-        res.status(200).json({
+        if (
+            !['number', 'string'].includes(typeof quantity) ||
+            !Number.isSafeInteger(qty) ||
+            qty < 1
+        ) {
+            return res.status(400).json({
+                error: "Quantity must be a positive whole number"
+            });
+        }
+
+        const fail = (status, message) => {
+            throw Object.assign(new Error(message), { status });
+        };
+
+        // Add to cart and remove from wishlist together.
+        await Cart.db.transaction(async session => {
+            const wishlist = await Wishlist.findOne({
+                user: userId,
+                products: productId
+            }).session(session);
+
+            if (!wishlist) {
+                fail(409, "Product is no longer in your wishlist");
+            }
+
+            const product = await productModel
+                .findById(productId)
+                .session(session);
+
+            if (!product) {
+                fail(404, "Product not found");
+            }
+
+            const dimension = product.dimensions.find(
+                option =>
+                    String(option._id) === dimensionId.toLowerCase()
+            );
+
+            if (!dimension) {
+                fail(400, "Selected dimension is unavailable");
+            }
+
+            const stock = Number(dimension.stock);
+
+            if (!Number.isSafeInteger(stock) || stock <= 0) {
+                fail(409, "Selected dimension is out of stock");
+            }
+
+            let cart = await Cart.findOne({
+                user: userId
+            }).session(session);
+
+            if (!cart) {
+                cart = new Cart({ user: userId, items: [] });
+            }
+
+            const matchingItems = cart.items.filter(item =>
+                String(item.product) === String(product._id) &&
+                String(item.dimensionId) === String(dimension._id)
+            );
+
+            const existingQuantity = matchingItems.reduce(
+                (total, item) => total + Number(item.quantity),
+                0
+            );
+
+            if (existingQuantity + qty > stock) {
+                fail(
+                    409,
+                    `Only ${stock} available for this dimension. ` +
+                    `You already have ${existingQuantity} in your cart.`
+                );
+            }
+
+            if (matchingItems.length > 0) {
+                matchingItems[0].quantity += qty;
+                matchingItems[0].size = dimension.size || null;
+            } else {
+                cart.items.push({
+                    product: product._id,
+                    dimensionId: dimension._id,
+                    size: dimension.size || null,
+                    quantity: qty
+                });
+            }
+
+            await cart.save({ session });
+
+            await Wishlist.updateOne(
+                { _id: wishlist._id },
+                { $pull: { products: product._id } },
+                { session }
+            );
+        });
+
+        return res.status(200).json({
             success: true,
             message: "Item moved to cart successfully"
         });
-
     } catch (error) {
         console.error("moveToCart error", error);
-        res.status(500).json({ error: "Internal server error" });
+
+        return res.status(error.status || 500).json({
+            error: error.status
+                ? error.message
+                : "Internal server error"
+        });
     }
 };
 
@@ -88,12 +164,12 @@ exports.getWishlist = async (req, res) => {
         const userId = req.user.id;
         const wishlist = await Wishlist.findOne({ user: userId }).populate({
             path: 'products',
-            select: 'title price thumbnail category'
+            select: 'title price thumbnail category dimensions isLuxe metal'
         });
 
         res.status(200).json({
             success: true,
-            products: wishlist ? wishlist.products : []
+            products: (wishlist?.products || []).filter(Boolean)
         });
     } catch (error) {
         res.status(500).json({ error: "Internal server error" });

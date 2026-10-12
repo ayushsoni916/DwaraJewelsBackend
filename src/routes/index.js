@@ -10,6 +10,7 @@ const orderRouter = require('./order.routes');
 const wishlistRouter = require('./wishlist.routes');
 const notificationRouter = require('./notification.routes');
 const collectionRouter = require('./collection.route');
+const adminRouter = require('./admin.routes');
 const router = express.Router();
 
 router.use('/auth', authRouter)
@@ -22,4 +23,6 @@ router.use('/orders', requireAuth, orderRouter);
 router.use('/wishlist', requireAuth, wishlistRouter);
 router.use('/notifications', notificationRouter);
 router.use('/collection', collectionRouter);
+
+router.use('/admin', adminRouter);
 module.exports = router;

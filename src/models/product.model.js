@@ -73,7 +73,18 @@ const productSchema = new mongoose.Schema({
     rating: {
         average: { type: Number, default: 0 },
         count: { type: Number, default: 0 } // UI: "(20 Reviews)"
-    }
+    },
+    isActive: {
+        type: Boolean,
+        default: true,
+    },
+
+    // gender
+    gender: {
+        type: String,
+        enum: ['Male', 'Female', 'Unisex'],
+        required: true,
+    },
 
 }, { timestamps: true });
 

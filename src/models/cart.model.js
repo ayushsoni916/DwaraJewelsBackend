@@ -21,6 +21,10 @@ const cartSchema = new mongoose.Schema({
         size: {
             type: String,
             default: null
+        },
+        dimensionId: {
+            type: mongoose.Schema.Types.ObjectId,
+            default: null
         }
     }],
     couponCode: {

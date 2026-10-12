@@ -104,31 +104,140 @@ const getAllCategories = async (req, res) => {
 
 // 3. Update Category (Admin - e.g., adding a new subCategory like "Jhumkas")
 const updateCategory = async (req, res) => {
+    let uploadedImage;
+    let saved = false;
+
     try {
         const { id } = req.params;
-        const updates = req.body;
 
-        const category = await categoryModel.findByIdAndUpdate(
-            id,
-            updates,
-            { new: true } // Return the updated document
-        );
+        if (!/^[a-f\d]{24}$/i.test(id || '')) {
+            return res.status(400).json({
+                error: 'Invalid category ID',
+            });
+        }
+
+        const body = req.body || {};
+
+        if (typeof body.name !== 'string' || !body.name.trim()) {
+            return res.status(400).json({
+                error: 'Category name is required',
+            });
+        }
+
+        const category = await categoryModel.findById(id);
 
         if (!category) {
-            return res.status(404).json({ error: "Category not found" });
+            return res.status(404).json({
+                error: 'Category not found',
+            });
         }
+
+        category.name = body.name.trim();
+
+        if (body.subCategories !== undefined) {
+            const values = typeof body.subCategories === 'string'
+                ? body.subCategories.split(',')
+                : body.subCategories;
+
+            if (
+                !Array.isArray(values) ||
+                values.some(value => typeof value !== 'string')
+            ) {
+                return res.status(400).json({
+                    error: 'Invalid subcategories',
+                });
+            }
+
+            category.subCategories = values
+                .map(value => value.trim())
+                .filter(Boolean);
+        }
+
+        for (const field of ['isFeatured', 'isLuxeCategory']) {
+            const value = body[field];
+
+            if (value === undefined) continue;
+
+            if (![true, false, 'true', 'false'].includes(value)) {
+                return res.status(400).json({
+                    error: `${field} must be true or false`,
+                });
+            }
+
+            category[field] = value === true || value === 'true';
+        }
+
+        await category.validate();
+
+        // Keep the existing image when no replacement is uploaded.
+        if (req.file) {
+            if (
+                !req.file.mimetype?.startsWith('image/') ||
+                !req.file.buffer
+            ) {
+                return res.status(400).json({
+                    error: 'Upload a valid image',
+                });
+            }
+
+            const result = await new Promise((resolve, reject) => {
+                const stream = cloudinary.uploader.upload_stream(
+                    {
+                        folder: 'dwara_categories',
+                        resource_type: 'image',
+                    },
+                    (error, result) =>
+                        error ? reject(error) : resolve(result)
+                );
+
+                stream.end(req.file.buffer);
+            });
+
+            uploadedImage = {
+                url: result.secure_url,
+                publicId: result.public_id,
+            };
+
+            category.image = uploadedImage;
+        }
+
+        await category.save();
+        saved = true;
 
         return res.json({
             success: true,
-            message: "Category updated",
-            category
+            message: 'Category updated',
+            category,
         });
-
     } catch (error) {
-        console.error("updateCategory error", error);
-        return res.status(500).json({ error: "Internal server error" });
+        // Clean up a new upload if saving the category failed.
+        if (uploadedImage && !saved) {
+            await cloudinary.uploader
+                .destroy(uploadedImage.publicId)
+                .catch(() => { });
+        }
+
+        console.error('updateCategory error:', error);
+
+        const validationError =
+            error.name === 'ValidationError' ||
+            error.name === 'CastError';
+
+        return res.status(
+            error.code === 11000
+                ? 409
+                : validationError
+                    ? 400
+                    : 500
+        ).json({
+            error: error.code === 11000
+                ? 'Category name already exists'
+                : validationError
+                    ? error.message
+                    : 'Unable to update category',
+        });
     }
-}
+};
 
 // 4. Delete Category
 const deleteCategory = async (req, res) => {
