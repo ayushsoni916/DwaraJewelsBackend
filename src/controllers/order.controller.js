@@ -236,6 +236,8 @@ exports.createOrder = async (req, res) => {
         const userId = req.user?.id;
         const body = req.body || {};
 
+        // console.log('createOrder request body:', body, "userId:", userId);
+
         if (!userId) {
             return res.status(401).json({
                 success: false,

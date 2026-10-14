@@ -28,6 +28,30 @@ const pendingStates = [
     'CreationNeedsReview',
 ];
 
+
+const PAYMENT_DEBUG = process.env.NODE_ENV !== 'production';
+
+function paymentLog(stage, details = {}) {
+    if (!PAYMENT_DEBUG) return;
+
+    console.log(
+        `\n[RAZORPAY] ${new Date().toISOString()} | ${stage}`,
+        details
+    );
+}
+
+function paymentLogError(stage, error) {
+    console.error(`[RAZORPAY ERROR] ${stage}`, {
+        message: error.message,
+        name: error.name,
+        code: error.code,
+        statusCode: error.statusCode,
+        needsPaymentReview: error.needsPaymentReview,
+        stack: PAYMENT_DEBUG ? error.stack : undefined,
+    });
+}
+
+
 function assertCheckoutBinding(checkout, payment, config) {
     if (
         checkout.mode !== config.mode ||
@@ -60,7 +84,10 @@ async function finalizeCheckout(
     reviewReason = ''
 ) {
     let result;
-
+    paymentLog('09 - STARTING MONGODB TRANSACTION', {
+        checkoutId: String(checkoutId),
+        paymentId: payment.id,
+    });
     await Order.db.transaction(async session => {
         const checkout = await PaymentCheckout.findById(
             checkoutId
@@ -69,6 +96,14 @@ async function finalizeCheckout(
         if (!checkout) {
             throw webhookError('Checkout snapshot is missing');
         }
+
+         paymentLog('10 - CHECKOUT LOADED IN TRANSACTION', {
+        found: Boolean(checkout),
+        status: checkout?.status,
+        itemCount: checkout?.items?.length,
+        amountPaise: checkout?.amountPaise,
+        currency: checkout?.currency,
+    });
 
         assertCheckoutBinding(checkout, payment, config);
 
@@ -123,6 +158,10 @@ async function finalizeCheckout(
             );
         }
 
+        paymentLog('11 - BEGINNING STOCK DEDUCTION', {
+            totalItems: checkout.items.length,
+        });
+
         for (const item of checkout.items) {
             if (
                 !item.dimensionId ||
@@ -154,6 +193,14 @@ async function finalizeCheckout(
                 },
                 { session }
             );
+
+            paymentLog('12 - STOCK UPDATE RESULT', {
+                productId: String(item.product),
+                dimensionId: String(item.dimensionId),
+                quantity: item.quantity,
+                matchedCount: updated.matchedCount,
+                modifiedCount: updated.modifiedCount,
+            });
 
             if (updated.modifiedCount !== 1) {
                 throw needsReview(
@@ -199,6 +246,13 @@ async function finalizeCheckout(
             { session }
         );
 
+        paymentLog('13 - MONGODB ORDER CREATED', {
+            orderId: String(order._id),
+            checkoutId: String(checkout._id),
+            amount: order.summary.totalCost,
+            paymentStatus: order.paymentStatus,
+        });
+
         const cart = await Cart.findOne({
             _id: checkout.cartId,
             user: checkout.user,
@@ -218,15 +272,34 @@ async function finalizeCheckout(
             );
         }
 
+        paymentLog('14 - CART PROCESSING COMPLETED', {
+            cartFound: Boolean(cart),
+            cartMatchedSnapshot: cart
+                ? getCartSignature(cart) === checkout.cartSignature
+                : false,
+        });
+
         checkout.status = 'OrderPlaced';
         checkout.order = order._id;
         checkout.lastError = '';
 
         await checkout.save({ session });
 
+        paymentLog('15 - CHECKOUT MARKED ORDERPLACED', {
+            checkoutId: String(checkout._id),
+            orderId: String(order._id),
+            status: checkout.status,
+        });
+
         result = { status: 'OrderPlaced' };
     });
 
+    paymentLog('16 - TRANSACTION COMMITTED', {
+        checkoutId: String(checkoutId),
+        result: result?.status,
+    });
+
+   
     return result;
 }
 
@@ -236,14 +309,29 @@ exports.razorpayWebhook = async (req, res) => {
     try {
         const signature = req.get('x-razorpay-signature');
 
+
+        paymentLog('01 - WEBHOOK RECEIVED', {
+            method: req.method,
+            path: req.originalUrl,
+            contentType: req.get('content-type'),
+            eventId: req.get('x-razorpay-event-id') || null,
+            signaturePresent: Boolean(signature),
+            rawBodyIsBuffer: Buffer.isBuffer(req.body),
+            bodySizeBytes: Buffer.isBuffer(req.body)
+                ? req.body.length
+                : null,
+        });
+
+
         // Verify before parsing JSON.
         if (!verifyRazorpayWebhook(req.body, signature)) {
+            paymentLog('02 - SIGNATURE REJECTED');
             return res.status(401).json({
                 success: false,
                 error: 'Invalid webhook signature',
             });
         }
-
+        paymentLog('02 - SIGNATURE VERIFIED');
         let event;
 
         try {
@@ -251,6 +339,22 @@ exports.razorpayWebhook = async (req, res) => {
         } catch {
             throw webhookError('Invalid webhook JSON', 400);
         }
+
+
+        paymentLog('03 - WEBHOOK PARSED', {
+            event: event?.event,
+            eventCreatedAt: event?.created_at,
+            payment: {
+                id: event?.payload?.payment?.entity?.id,
+                orderId: event?.payload?.payment?.entity?.order_id,
+                status: event?.payload?.payment?.entity?.status,
+                captured: event?.payload?.payment?.entity?.captured,
+                capturedType: typeof event?.payload?.payment?.entity?.captured,
+                amount: event?.payload?.payment?.entity?.amount,
+                currency: event?.payload?.payment?.entity?.currency,
+            },
+        });
+
 
         if (
             !event ||
@@ -298,6 +402,16 @@ exports.razorpayWebhook = async (req, res) => {
             razorpayOrderId: payment.order_id,
         }).lean();
 
+
+        paymentLog('04 - CHECKOUT LOOKUP', {
+            razorpayOrderId: payment.order_id,
+            found: Boolean(checkout),
+            checkoutId: checkout?._id?.toString(),
+            checkoutStatus: checkout?.status,
+            savedPaymentId: checkout?.razorpayPaymentId,
+        });
+
+
         if (!checkout) {
             // Handles capture arriving before createOrder saves the ID.
             const remoteOrder = await fetchRazorpayOrder(
@@ -329,7 +443,17 @@ exports.razorpayWebhook = async (req, res) => {
             }
         }
 
+        paymentLog('05 - CHECKING PAYMENT BINDING', {
+            checkoutId: checkout?._id?.toString(),
+            checkoutMode: checkout?.mode,
+            configuredMode: config.mode,
+            checkoutAmount: checkout?.amountPaise,
+            paymentAmount: payment.amount,
+        });
+
         assertCheckoutBinding(checkout, payment, config);
+
+        paymentLog('05 - PAYMENT BINDING VERIFIED');
 
         if (
             ['OrderPlaced', 'PaidNeedsReview'].includes(
@@ -350,8 +474,26 @@ exports.razorpayWebhook = async (req, res) => {
             });
         }
 
+
+        paymentLog('06 - FETCHING PAYMENT FROM RAZORPAY', {
+            paymentId: payment.id,
+        });
         // Verify current payment through this mode's API credentials.
         const current = await fetchRazorpayPayment(payment.id);
+
+
+        paymentLog('06 - RAZORPAY API RESPONSE', {
+            id: current.id,
+            orderId: current.order_id,
+            status: current.status,
+            captured: current.captured,
+            capturedType: typeof current.captured,
+            amount: current.amount,
+            currency: current.currency,
+            refundedAmount: current.amount_refunded,
+            method: current.method,
+        });
+
 
         if (
             current.order_id !== payment.order_id ||
@@ -397,6 +539,11 @@ exports.razorpayWebhook = async (req, res) => {
         let result;
 
         try {
+            paymentLog('07 - STARTING ORDER FINALIZATION', {
+                checkoutId: checkout._id.toString(),
+                paymentId: payment.id,
+                reviewReason,
+            });
             result = await finalizeCheckout(
                 checkout._id,
                 payment,
@@ -406,6 +553,7 @@ exports.razorpayWebhook = async (req, res) => {
             );
         } catch (error) {
             if (!error.needsPaymentReview) {
+                paymentLogError('07 - FINALIZATION ATTEMPT FAILED', error);
                 throw error;
             }
 
@@ -427,16 +575,25 @@ exports.razorpayWebhook = async (req, res) => {
             );
         }
 
+        paymentLog('08 - WEBHOOK COMPLETED', {
+            checkoutId: checkout._id.toString(),
+            result: result.status,
+            httpStatus: 200,
+        });
+
         return res.status(200).json({
             success: true,
             received: true,
             status: result.status,
         });
     } catch (error) {
-        console.error(
-            'razorpayWebhook:',
-            error.statusCode || 503
-        );
+        paymentLogError('WEBHOOK PROCESSING FAILED', error);
+        console.error('RAZORPAY WEBHOOK ERROR:', {
+            message: error.message,
+            statusCode: error.statusCode || 503,
+            name: error.name,
+            code: error.code,
+        });
 
         return res.status(error.statusCode || 503).json({
             success: false,
@@ -455,6 +612,11 @@ exports.getCheckoutStatus = async (req, res) => {
 
         const userId = req.user?.id;
         const { checkoutId } = req.params;
+
+        paymentLog('STATUS API - REQUEST', {
+            checkoutId,
+            authenticated: Boolean(userId),
+        });
 
         if (!userId) {
             return res.status(401).json({
@@ -490,6 +652,13 @@ exports.getCheckoutStatus = async (req, res) => {
             checkout.status === 'OrderPlaced' &&
             Boolean(checkout.order);
 
+        paymentLog('STATUS API - DATABASE RESULT', {
+            checkoutId,
+            found: Boolean(checkout),
+            status: checkout?.status,
+            orderId: checkout?.order?.toString(),
+        });
+
         return res.status(200).json({
             success: true,
             checkoutId: checkout._id,
@@ -503,6 +672,7 @@ exports.getCheckoutStatus = async (req, res) => {
         });
     } catch (error) {
         console.error('getCheckoutStatus:', error);
+        paymentLogError('STATUS API FAILED', error);
 
         return res.status(500).json({
             success: false,

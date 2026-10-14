@@ -14,7 +14,7 @@ const generateOtp = () => {
 const createOtpForPhone = async (phone) => {
     // console.log(`Creating OTP for phone: ${phone}`);
     const code = phone == '9166033002' ? '111111' : generateOtp(); // for testing, you can set a fixed OTP for a specific phone number
-    // console.log(`Generated OTP: ${code} for phone: ${phone}`);
+    console.log(`Generated OTP: ${code} for phone: ${phone}`);
     const expiresAt = new Date(Date.now() + OTP_TTL_MS)
 
     const salt = await bcrypt.genSalt(BCRYPT_ROUNDS)

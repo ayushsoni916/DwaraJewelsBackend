@@ -82,7 +82,10 @@ function normalizeCheckoutAddress(input) {
         !address.state ||
         !/^[6-9]\d{9}$/.test(address.phone) ||
         !/^[1-9]\d{5}$/.test(address.pincode) ||
-        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address.email) ||
+        (
+            address.email &&
+            !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address.email)
+        ) ||
         address.email.length > 254 ||
         ['firstName', 'lastName', 'city', 'state'].some(
             field => address[field].length > 100

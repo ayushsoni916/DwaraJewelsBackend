@@ -27,7 +27,7 @@ router.use('/notifications', notificationRouter);
 router.use('/collection', collectionRouter);
 router.use('/shipping', shippingRouter);
 
-router.post('/api/payments/razorpay/webhook', express.raw({ type: 'application/json', limit: '256kb', }), razorpayWebhook);
+// router.post('/payments/razorpay/webhook', express.raw({ type: 'application/json', limit: '256kb', }), razorpayWebhook);
 
 router.use('/admin', adminRouter);
 module.exports = router;

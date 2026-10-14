@@ -189,6 +189,21 @@ async function assignShiprocketAwb(shipmentId, courierId) {
             }
         );
 
+        console.log('SHIPROCKET AWB RESULT:', {
+    awbAssignStatus: response?.awb_assign_status,
+    responseStatus: response?.response?.status,
+    message:
+        response?.response?.message ??
+        response?.message ??
+        null,
+    hasAwb: Boolean(response?.response?.data?.awb_code),
+    returnedShipmentId:
+        response?.response?.data?.shipment_id ?? null,
+    returnedCourierId:
+        response?.response?.data?.courier_company_id ?? null,
+    error: response?.response?.error ?? null,
+});
+
         const data = response?.response?.data;
 
         // Keep AWB as a string to preserve leading zeros.

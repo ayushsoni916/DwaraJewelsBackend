@@ -3,8 +3,19 @@ const express = require('express');
 const connectDB = require('./config/db');
 const router = require('./routes');
 const cors = require('cors'); // 1. Import CORS
+const { razorpayWebhook } = require('./controllers/payment.controller');
 
 const app = express();
+
+// Razorpay must receive its original raw body.
+app.post(
+  '/api/payments/razorpay/webhook',
+  express.raw({
+    type: 'application/json',
+    limit: '256kb',
+  }),
+  razorpayWebhook
+);
 
 //connect Database
 connectDB();
