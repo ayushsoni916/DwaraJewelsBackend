@@ -9,6 +9,7 @@ const { getAllUsers } = require("./user.routes");
 const { updateOrderStatus, getAdminOrderDetails, getAllOrders } = require('../controllers/adminOrder.controller');
 const { getAdminCoupons, createAdminCoupon, updateAdminCoupon, deleteAdminCoupon } = require('../controllers/adminCoupon.controller');
 const { getAdminProducts, getAdminProduct, createProduct, updateAdminProduct, setProductActive } = require('../controllers/product.controller');
+const { getOrderShippingRates, createOrderShipment } = require('../controllers/shipping.controller');
 
 const adminRouter = express.Router();
 
@@ -20,6 +21,9 @@ adminRouter.get('/orders', getAllOrders);
 adminRouter.get('/orders/:orderId', getAdminOrderDetails);
 
 adminRouter.put('/orders/:orderId/status', updateOrderStatus);
+
+adminRouter.post('/orders/:orderId/shipping/rates', getOrderShippingRates);
+adminRouter.post('/orders/:orderId/shipping/create', createOrderShipment);
 
 adminRouter.get('/coupons', getAdminCoupons);
 adminRouter.post('/coupons', createAdminCoupon);

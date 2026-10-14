@@ -1,5 +1,68 @@
 const mongoose = require('mongoose');
 
+const positiveMeasurement = () => ({
+    type: Number,
+    validate: {
+        validator: value => Number.isFinite(value) && value > 0,
+        message: 'Package measurements must be greater than zero',
+    },
+});
+
+const shipmentSchema = new mongoose.Schema({
+    sourceOrderId: { type: String, trim: true },
+    shiprocketOrderId: { type: Number, min: 1 },
+    shipmentId: { type: Number, min: 1 },
+
+    awbCode: { type: String, trim: true },
+    courierId: { type: Number },
+    courierName: { type: String },
+    pickupLocation: { type: String },
+
+    bookingStatus: {
+        type: String,
+        enum: [
+            'NotCreated',
+            'Creating',
+            'Created',
+            'NeedsReview',
+            'Failed',
+        ],
+        default: 'NotCreated',
+    },
+    bookingStartedAt: { type: Date },
+    lastOperation: { type: String },
+    lastError: { type: String, maxlength: 1000 },
+
+    // Packed parcel measurements.
+    packageDetails: {
+        weightKg: positiveMeasurement(),
+        lengthCm: positiveMeasurement(),
+        breadthCm: positiveMeasurement(),
+        heightCm: positiveMeasurement(),
+    },
+
+    pickupRequestedAt: { type: Date },
+    pickupScheduledAt: { type: Date },
+
+    labelUrl: { type: String },
+    manifestUrl: { type: String },
+    trackingUrl: { type: String },
+
+    shipmentStatus: { type: String },
+    shipmentStatusId: { type: Number },
+    estimatedDeliveryAt: { type: Date },
+    lastEventAt: { type: Date },
+    lastSyncedAt: { type: Date },
+
+    trackingEvents: [{
+        date: Date,
+        activity: String,
+        location: String,
+        status: String,
+        _id: false,
+    }],
+}, { _id: false });
+
 const orderSchema = new mongoose.Schema({
     user: {
         type: mongoose.Schema.Types.ObjectId,
@@ -42,6 +105,11 @@ const orderSchema = new mongoose.Schema({
     shippingAddress: {
         type: Object,
         required: true,
+    },
+
+    shipping: {
+        type: shipmentSchema,
+        default: () => ({}),
     },
 
     summary: {
@@ -108,6 +176,15 @@ const orderSchema = new mongoose.Schema({
             width: String,
             length: String,
         },
+        // Customer → warehouse.
+        returnShipment: {
+            type: shipmentSchema,
+        },
+
+        // Exchange replacement: warehouse → customer.
+        replacementShipment: {
+            type: shipmentSchema,
+        },
 
         status: {
             type: String,
@@ -150,6 +227,26 @@ const orderSchema = new mongoose.Schema({
     },
 }, {
     timestamps: true,
+});
+
+orderSchema.index(
+    { 'shipping.shipmentId': 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            'shipping.shipmentId': { $type: 'number' },
+        },
+    }
+);
+
+orderSchema.index({ 'shipping.awbCode': 1 });
+
+orderSchema.index({
+    'serviceRequests.returnShipment.awbCode': 1,
+});
+
+orderSchema.index({
+    'serviceRequests.replacementShipment.awbCode': 1,
 });
 
 module.exports = mongoose.model('Order', orderSchema);
