@@ -220,6 +220,21 @@ const orderSchema = new mongoose.Schema({
         type: String,
         default: 'Pending',
     },
+    payment: {
+        provider: {
+            type: String,
+            enum: ['Razorpay'],
+        },
+        mode: {
+            type: String,
+            enum: ['Test', 'Live'],
+        },
+        razorpayOrderId: String,
+        razorpayPaymentId: String,
+        amountPaise: Number,
+        currency: String,
+        capturedAt: Date,
+    },
 
     orderDate: {
         type: Date,

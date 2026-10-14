@@ -11,18 +11,23 @@ const wishlistRouter = require('./wishlist.routes');
 const notificationRouter = require('./notification.routes');
 const collectionRouter = require('./collection.route');
 const adminRouter = require('./admin.routes');
+const shippingRouter = require('./shipping.routes');
+const { razorpayWebhook } = require('./../controllers/payment.controller');
 const router = express.Router();
 
 router.use('/auth', authRouter)
 router.use('/banners', bannerRouter);
-router.use('/product',productRouter)
-router.use('/category',categoryRouter)
+router.use('/product', productRouter)
+router.use('/category', categoryRouter)
 router.use('/cart', requireAuth, cartRouter)
 router.use('/address', requireAuth, addressRouter);
 router.use('/orders', requireAuth, orderRouter);
 router.use('/wishlist', requireAuth, wishlistRouter);
 router.use('/notifications', notificationRouter);
 router.use('/collection', collectionRouter);
+router.use('/shipping', shippingRouter);
+
+router.post('/api/payments/razorpay/webhook', express.raw({ type: 'application/json', limit: '256kb', }), razorpayWebhook);
 
 router.use('/admin', adminRouter);
 module.exports = router;
