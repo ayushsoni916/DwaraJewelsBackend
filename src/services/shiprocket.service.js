@@ -190,19 +190,19 @@ async function assignShiprocketAwb(shipmentId, courierId) {
         );
 
         console.log('SHIPROCKET AWB RESULT:', {
-    awbAssignStatus: response?.awb_assign_status,
-    responseStatus: response?.response?.status,
-    message:
-        response?.response?.message ??
-        response?.message ??
-        null,
-    hasAwb: Boolean(response?.response?.data?.awb_code),
-    returnedShipmentId:
-        response?.response?.data?.shipment_id ?? null,
-    returnedCourierId:
-        response?.response?.data?.courier_company_id ?? null,
-    error: response?.response?.error ?? null,
-});
+            awbAssignStatus: response?.awb_assign_status,
+            responseStatus: response?.response?.status,
+            message:
+                response?.response?.message ??
+                response?.message ??
+                null,
+            hasAwb: Boolean(response?.response?.data?.awb_code),
+            returnedShipmentId:
+                response?.response?.data?.shipment_id ?? null,
+            returnedCourierId:
+                response?.response?.data?.courier_company_id ?? null,
+            error: response?.response?.error ?? null,
+        });
 
         const data = response?.response?.data;
 
@@ -437,7 +437,75 @@ async function fetchShiprocketTracking(awbCode) {
     };
 }
 
+
+async function getShiprocketShipmentDetails(shipmentId) {
+    const id = Number(shipmentId);
+
+    if (!Number.isSafeInteger(id) || id <= 0) {
+        throw new Error('Invalid Shiprocket shipment ID');
+    }
+
+    const response = await shiprocketRequest(
+        'GET',
+        `/shipments/${id}`
+    );
+
+    const data = response?.data;
+
+    if (
+        !data ||
+        typeof data !== 'object' ||
+        Number(data.id) !== id
+    ) {
+        throw new Error('Unexpected Shiprocket shipment response');
+    }
+
+    const awb = data.awb ?? data.awb_code;
+
+    const result = {
+        shipmentId: id,
+        shiprocketOrderId: data.order_id ?? null,
+        awbCode: awb == null ? '' : String(awb).trim(),
+        courierId: data.sr_courier_id ?? null,
+        courierName: data.courier ?? null,
+        shipmentStatus: data.status ?? null,
+
+        awbAssignDate: data.awb_assign_date ?? null,
+        statusName: data.status_name ?? null,
+    };
+
+    console.log('Shiprocket shipment check:', {
+        shipmentId: result.shipmentId,
+        hasAwb: Boolean(result.awbCode),
+        courierId: result.courierId,
+        shipmentStatus: result.shipmentStatus,
+
+        awbAssignDate: data.awb_assign_date ?? null,
+        statusName: data.status_name ?? null,
+    });
+
+    return result;
+}
+
+const cancelShiprocketShipment = async awbCode => {
+    const awb = String(awbCode || '').trim();
+
+    if (!/^[a-zA-Z0-9-]{5,50}$/.test(awb)) {
+        throw new Error('Invalid AWB');
+    }
+
+    return shiprocketRequest(
+        'POST',
+        '/orders/cancel/shipment/awbs',
+        {
+            data: {
+                awbs: [awb],
+            },
+        }
+    );
+};
+
 module.exports = {
     shiprocketRequest, createShiprocketOrder, assignShiprocketAwb, requestShiprocketPickup, generateShiprocketLabel,
-    generateShiprocketManifest, fetchShiprocketTracking
+    generateShiprocketManifest, fetchShiprocketTracking, getShiprocketShipmentDetails, cancelShiprocketShipment
 };

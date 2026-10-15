@@ -11,7 +11,10 @@ const { getAdminCoupons, createAdminCoupon, updateAdminCoupon, deleteAdminCoupon
 const { getAdminProducts, getAdminProduct, createProduct, updateAdminProduct, setProductActive } = require('../controllers/product.controller');
 const { getOrderShippingRates, createOrderShipment, assignOrderAwb, requestOrderPickup, generateOrderLabel,
     generateOrderManifest,
-    getAdminOrderTracking, } = require('../controllers/shipping.controller');
+    getAdminOrderTracking,
+    checkOrderAwbStatus,
+    resolveOrderAwbIssue,
+    cancelOrderShipment, } = require('../controllers/shipping.controller');
 
 const adminRouter = express.Router();
 
@@ -32,6 +35,9 @@ adminRouter.post('/orders/:orderId/shipping/label', generateOrderLabel);
 
 adminRouter.post('/orders/:orderId/shipping/manifest', generateOrderManifest);
 adminRouter.get('/orders/:orderId/shipping/tracking', getAdminOrderTracking);
+adminRouter.get('/orders/:orderId/shipping/awb-status', checkOrderAwbStatus);
+adminRouter.post('/orders/:orderId/shipping/awb-recover', resolveOrderAwbIssue);
+adminRouter.post('/orders/:orderId/shipping/cancel', cancelOrderShipment);
 
 adminRouter.get('/coupons', getAdminCoupons);
 adminRouter.post('/coupons', createAdminCoupon);

@@ -8,7 +8,9 @@ const {
     requestShiprocketPickup,
     generateShiprocketLabel,
     generateShiprocketManifest,
-    fetchShiprocketTracking
+    fetchShiprocketTracking,
+    getShiprocketShipmentDetails,
+    cancelShiprocketShipment
 } = require('../services/shiprocket.service');
 
 const {
@@ -1825,7 +1827,236 @@ const receiveShippingEvent = async (req, res) => {
     }
 };
 
+
+const checkOrderAwbStatus = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+
+        if (!/^[a-f\d]{24}$/i.test(orderId || '')) {
+            return res.status(400).json({
+                error: 'Invalid order ID',
+            });
+        }
+
+        const order = await Order.findById(orderId)
+            .select('shipping')
+            .lean();
+
+        if (!order) {
+            return res.status(404).json({
+                error: 'Order not found',
+            });
+        }
+
+        const shipmentId = order.shipping?.shipmentId;
+
+        if (!shipmentId) {
+            return res.status(409).json({
+                error: 'No Shiprocket shipment exists',
+            });
+        }
+
+        const remote = await getShiprocketShipmentDetails(
+            shipmentId
+        );
+
+        if (
+            Number(remote.shiprocketOrderId) !==
+            Number(order.shipping.shiprocketOrderId)
+        ) {
+            return res.status(409).json({
+                error: 'Shiprocket order ID mismatch. Manual review required.',
+            });
+        }
+
+        console.log('AWB reconciliation check:', {
+            orderId: String(order._id),
+            bookingStatus: order.shipping.bookingStatus,
+            hasRemoteAwb: Boolean(remote.awbCode),
+            hasLocalAwb: Boolean(order.shipping.awbCode),
+        });
+
+        return res.status(200).json({
+            success: true,
+            awbAssigned: Boolean(remote.awbCode),
+            remote,
+            bookingStatus: order.shipping.bookingStatus,
+            message: remote.awbCode
+                ? 'An AWB already exists in Shiprocket.'
+                : 'No AWB currently appears in Shiprocket.',
+        });
+    } catch (error) {
+        console.error(
+            'checkOrderAwbStatus:',
+            error.message
+        );
+
+        return res.status(502).json({
+            error: 'Unable to verify shipment status with Shiprocket',
+        });
+    }
+};
+
+const resolveOrderAwbIssue = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+
+        if (!/^[a-f\d]{24}$/i.test(orderId || '')) {
+            return res.status(400).json({
+                error: 'Invalid order ID',
+            });
+        }
+
+        const order = await Order.findById(orderId)
+            .select('shipping status updatedAt')
+            .lean();
+
+        if (!order) {
+            return res.status(404).json({
+                error: 'Order not found',
+            });
+        }
+
+        const shipping = order.shipping || {};
+
+        if (
+            shipping.bookingStatus !== 'NeedsReview' ||
+            shipping.lastOperation !== 'AssignAWB' ||
+            shipping.awbCode ||
+            !shipping.shipmentId
+        ) {
+            return res.status(409).json({
+                error: 'This shipment is not eligible for AWB recovery',
+            });
+        }
+
+        const remote = await getShiprocketShipmentDetails(
+            shipping.shipmentId
+        );
+
+        if (
+            Number(remote.shipmentId) !== Number(shipping.shipmentId) ||
+            Number(remote.shiprocketOrderId) !==
+            Number(shipping.shiprocketOrderId)
+        ) {
+            return res.status(409).json({
+                error: 'Shiprocket shipment IDs do not match',
+            });
+        }
+
+        if (
+            remote.awbCode ||
+            remote.courierId ||
+            Number(remote.shipmentStatus) !== 11
+        ) {
+            return res.status(409).json({
+                error: 'Remote shipment requires review before retrying',
+            });
+        }
+
+        // Explicit admin recovery, not an automatic retry.
+        const updated = await Order.findOneAndUpdate(
+            {
+                _id: order._id,
+                updatedAt: order.updatedAt,
+                'shipping.bookingStatus': 'NeedsReview',
+                'shipping.lastOperation': 'AssignAWB',
+                'shipping.shipmentId': shipping.shipmentId,
+                $or: [
+                    { 'shipping.awbCode': { $exists: false } },
+                    { 'shipping.awbCode': null },
+                    { 'shipping.awbCode': '' },
+                ],
+            },
+            {
+                $set: {
+                    'shipping.bookingStatus': 'Created',
+                    'shipping.lastError': '',
+                    'shipping.lastOperation': 'ResolveAWB',
+                },
+            },
+            {
+                new: true,
+                runValidators: true,
+            }
+        );
+
+        if (!updated) {
+            return res.status(409).json({
+                error: 'Order changed. Refresh and try again.',
+            });
+        }
+
+        console.log('AWB recovery completed:', {
+            orderId,
+            shipmentId: shipping.shipmentId,
+            previousStatus: 'NeedsReview',
+            newStatus: updated.shipping.bookingStatus,
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Shipment unlocked for AWB assignment',
+            shipping: updated.shipping,
+        });
+
+    } catch (error) {
+        console.error('resolveOrderAwbIssue:', error.message);
+
+        return res.status(502).json({
+            error: 'Unable to verify and recover the shipment',
+        });
+    }
+};
+
+const cancelOrderShipment = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+
+        if (!/^[a-f\d]{24}$/i.test(orderId || '')) {
+            return res.status(400).json({
+                error: 'Invalid order ID',
+            });
+        }
+
+        const order = await Order.findById(orderId)
+            .select('shipping')
+            .lean();
+
+        if (!order) {
+            return res.status(404).json({
+                error: 'Order not found',
+            });
+        }
+
+        const shipping = order.shipping || {};
+
+        if (!shipping.awbCode) {
+            return res.status(409).json({
+                error: 'No AWB assigned to this shipment',
+            });
+        }
+
+        const result = await cancelShiprocketShipment(shipping.awbCode);
+
+        console.log('SHIPROCKET CANCELLATION RESULT:', result);
+
+        return res.status(200).json({
+            success: true,
+            message: 'Cancellation request sent to Shiprocket',
+            cancellation: result,
+        });
+    } catch (error) {
+        console.error('cancelOrderShipment:', error.message);
+
+        return res.status(502).json({
+            error: 'Unable to request shipment cancellation',
+        });
+    }
+};
+
 module.exports = {
     getOrderShippingRates, createOrderShipment, assignOrderAwb, requestOrderPickup, generateOrderLabel,
-    generateOrderManifest, getMyOrderTracking, getAdminOrderTracking, receiveShippingEvent
+    generateOrderManifest, getMyOrderTracking, getAdminOrderTracking, receiveShippingEvent, checkOrderAwbStatus,
+    resolveOrderAwbIssue, cancelOrderShipment
 };
