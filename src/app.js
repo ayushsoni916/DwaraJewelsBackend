@@ -21,7 +21,16 @@ app.post(
 connectDB();
 
 //Init Middleware
-app.use(cors());
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'http://192.168.1.105:3000',
+    'http://78.159.126.218:3000',
+    'https://dwarajewels.in',
+    'https://www.dwarajewels.in',
+  ],
+  credentials: true,
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

@@ -380,25 +380,29 @@ const getProductDetails = async (req, res) => {
 const getSimilarProducts = async (req, res) => {
     try {
         const { id } = req.params;
+        const { all } = req.query;
 
-        // 1. Find the current product to get its metadata
         const currentProduct = await productModel.findById(id);
 
         if (!currentProduct) {
             return res.status(404).json({ error: "Product not found" });
         }
 
-        // 2. Build the similarity query
         const query = {
-            _id: { $ne: currentProduct._id }, // Exclude the current product
-            category: currentProduct.category, // Match category
-            isLuxe: currentProduct.isLuxe      // Match the Luxe/Normal status
+            _id: { $ne: currentProduct._id },
+            category: currentProduct.category,
+            isLuxe: currentProduct.isLuxe
         };
 
-        const similarProducts = await productModel.find(query)
-            .limit(6)
+        let productsQuery = productModel.find(query)
             .select("title price thumbnail metal isLuxe")
             .lean();
+
+        if (all !== 'true') {
+            productsQuery = productsQuery.limit(6);
+        }
+
+        const similarProducts = await productsQuery;
 
         return res.json({
             success: true,
@@ -409,7 +413,7 @@ const getSimilarProducts = async (req, res) => {
         console.error("getSimilarProducts error", error);
         return res.status(500).json({ error: "Internal server error" });
     }
-}
+};
 
 const validProductId = value =>
     typeof value === 'string' && /^[a-f\d]{24}$/i.test(value);
